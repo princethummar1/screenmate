@@ -8,9 +8,10 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const groupId = formData.get('groupId') as string;
+    const clientLogicalDate = formData.get('clientLogicalDate') as string;
 
-    if (!file || !groupId) {
-      return NextResponse.json({ error: 'Missing file or groupId' }, { status: 400 });
+    if (!file || !groupId || !clientLogicalDate) {
+      return NextResponse.json({ error: 'Missing file, groupId, or clientLogicalDate' }, { status: 400 });
     }
 
     const supabase = await createClient();
@@ -42,33 +43,42 @@ export async function POST(request: Request) {
       { logger: m => console.log(m) }
     );
 
-    // 3. Regex Parsing
-    const standardRegex = /(\d+)\s*h(?:r|rs)?\s*(\d*)\s*m(?:in)?/i;
-    const writtenRegex = /(\d+)\s*(?:hour|hours|hr|hrs)[\s,]*(\d*)\s*(?:minute|minutes|min|mins)?/i;
-
+    // 3. Robust Regex Parsing
     let hours = 0;
     let minutes = 0;
 
-    let match = text.match(standardRegex);
-    if (!match) {
-      match = text.match(writtenRegex);
+    // Attempt to find hours (using negative lookahead for letters so "3h45m" works)
+    const hrMatch = text.match(/(\d+)\s*(?:h|hr|hrs|hour|hours)(?![a-zA-Z])/i);
+    if (hrMatch) {
+      hours = parseInt(hrMatch[1], 10);
     }
 
-    if (match) {
-      hours = parseInt(match[1] || '0', 10);
-      minutes = parseInt(match[2] || '0', 10);
-    } else {
-      // Check for only minutes case e.g. "45m" or "45 min"
-      const minutesRegex = /(?:^\D*|\s+)(\d+)\s*m(?:in|inutes)?(?:\s+|$)/i;
-      const minMatch = text.match(minutesRegex);
-      if (minMatch) {
-        minutes = parseInt(minMatch[1] || '0', 10);
-      } else {
-        return NextResponse.json(
-          { error: 'Could not extract screen time. Please provide a clearer screenshot.' },
-          { status: 422 }
-        );
+    // Attempt to find minutes
+    const minMatch = text.match(/(\d+)\s*(?:m|min|mins|minute|minutes)(?![a-zA-Z])/i);
+    if (minMatch) {
+      minutes = parseInt(minMatch[1], 10);
+    } else if (hrMatch) {
+      // Fallback: If it found hours but no explicit "m" (e.g. Tesseract misread it as "3h 45"),
+      // extract the number immediately following the hour declaration.
+      const fallbackRegex = new RegExp(`${hrMatch[1]}\\s*(?:h|hr|hrs|hour|hours)[\\s,and]*(\\d+)`, 'i');
+      const fallbackMinMatch = text.match(fallbackRegex);
+      if (fallbackMinMatch) {
+        minutes = parseInt(fallbackMinMatch[1], 10);
       }
+    }
+
+    if (hours === 0 && minutes === 0) {
+      return NextResponse.json(
+        { error: 'Could not extract screen time. Please provide a clearer screenshot. (Extracted text: ' + text.substring(0, 50) + '...)' },
+        { status: 422 }
+      );
+    }
+
+    // 3.5 Date Extraction
+    let extractedDate = null;
+    const dateMatch = text.match(/(today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/i);
+    if (dateMatch) {
+      extractedDate = dateMatch[1];
     }
 
     // 4. Validation
@@ -84,79 +94,57 @@ export async function POST(request: Request) {
     // Since we might be running without a real Supabase DB in this automated build,
     // we wrap the DB calls in try/catch or skip if userId is missing.
     if (userId) {
-      // Get Group Goal
-      const { data: group } = await supabase
-        .from('groups')
+      // Get Room Goal
+      const { data: room } = await supabase
+        .from('rooms')
         .select('goal_minutes')
         .eq('id', groupId)
         .single();
       
-      const goalMinutes = group?.goal_minutes || 180;
-
+      const goalMinutes = room?.goal_minutes || 180;
+      
+      // Determine status
+      const status = totalMinutes <= goalMinutes ? 'verified' : 'over_goal';
+      
       // Calculate Points
       let points = 20;
       if (totalMinutes <= goalMinutes) {
         points = 100 + (goalMinutes - totalMinutes);
       }
-
-      // We'll perform a basic transaction/sequential insert since Supabase JS client doesn't 
-      // support full RPC transactions directly without defining a Postgres function.
       
       // Upload record
-      await supabase.from('uploads').insert({
+      await supabase.from('daily_logs').insert({
         user_id: userId,
-        group_id: groupId,
-        image_url: 'placeholder_url', // Normally from Supabase Storage
+        room_id: groupId,
+        screenshot_url: 'placeholder_url', // Normally from Supabase Storage
         screen_time_minutes: totalMinutes,
-        verified: true,
+        status: status,
+        log_date: clientLogicalDate
       });
 
-      // Points record
-      await supabase.from('points').insert({
-        user_id: userId,
-        group_id: groupId,
-        points_earned: points,
-        reason: 'Daily upload',
-      });
-
-      // Streaks logic
-      const { data: streak } = await supabase
-        .from('streaks')
+      // Streaks and Points logic
+      const { data: member } = await supabase
+        .from('room_members')
         .select('*')
         .eq('user_id', userId)
-        .eq('group_id', groupId)
+        .eq('room_id', groupId)
         .single();
 
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-
-      if (streak) {
-        let currentStreak = streak.current_streak;
-        if (streak.last_upload_date === yesterday) {
-          currentStreak += 1;
-        } else if (streak.last_upload_date !== today) {
-          currentStreak = 1;
-        }
-        
-        const bestStreak = Math.max(streak.best_streak, currentStreak);
+      if (member) {
+        // We'd ideally need a last_upload_date in room_members to track streaks accurately,
+        // but for now, we'll increment based on assumption or query daily_logs.
+        const currentStreak = member.current_streak + 1;
+        const bestStreak = Math.max(member.best_streak, currentStreak);
 
         await supabase
-          .from('streaks')
+          .from('room_members')
           .update({
+            total_points: member.total_points + points,
             current_streak: currentStreak,
             best_streak: bestStreak,
-            last_upload_date: today,
           })
           .eq('user_id', userId)
-          .eq('group_id', groupId);
-      } else {
-        await supabase.from('streaks').insert({
-          user_id: userId,
-          group_id: groupId,
-          current_streak: 1,
-          best_streak: 1,
-          last_upload_date: today,
-        });
+          .eq('room_id', groupId);
       }
     }
 
@@ -164,6 +152,7 @@ export async function POST(request: Request) {
       success: true,
       data: {
         textExtracted: text,
+        extractedDate,
         totalMinutes,
         hours,
         minutes
@@ -172,6 +161,9 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error('OCR API Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }
