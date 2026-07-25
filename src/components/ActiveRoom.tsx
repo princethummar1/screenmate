@@ -236,7 +236,7 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
         <div className="xl:col-span-2 space-y-8 flex flex-col">
           
           {/* Action Card (Dropzone) */}
-          {!result && status !== 'verified' && (
+          {(!result || result.status === 'error') && status !== 'verified' && (
             <div className="rounded-3xl border border-white/10 bg-[#030303]/80 backdrop-blur-xl p-6 md:p-10 shadow-2xl relative overflow-hidden flex-1 flex flex-col justify-center">
               <h3 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em] mb-6">Today's Evidence</h3>
               

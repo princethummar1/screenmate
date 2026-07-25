@@ -46,3 +46,6 @@ Now you can open [http://localhost:3000](http://localhost:3000) to see your app 
 ## 🗄️ Database Setup
 
 The required Supabase database schema and Row Level Security (RLS) policies are located in `supabase/schema.sql`. Execute this SQL script in your Supabase project's SQL Editor to create the necessary tables and permissions.
+
+
+lYkrEGBuTSGP54pa
