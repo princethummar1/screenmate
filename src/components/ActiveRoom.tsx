@@ -5,6 +5,7 @@ import { UploadCloud, CheckCircle, Flame, Trophy, Loader2, Users, Clock, Bell, A
 import ShareModal from './ShareModal';
 import Link from 'next/link';
 import HistoryChart from './HistoryChart';
+import { createWorker } from 'tesseract.js';
 
 type Room = {
   id: string;
@@ -52,6 +53,7 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
   const [errorMsg, setErrorMsg] = useState('');
   const [timeUntilReset, setTimeUntilReset] = useState('');
   const [showOcrDebug, setShowOcrDebug] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<{ status: string, progress: number } | null>(null);
 
   // Calculate days elapsed
   const start = new Date(room.start_date).getTime();
@@ -104,20 +106,40 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
   const handleUpload = async () => {
     if (!file) return;
     setStatus('uploading');
+    setOcrProgress({ status: 'Initializing AI Engine...', progress: 0 });
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('groupId', room.id);
-    
-    // Pass client logical date to ensure it respects timezone and reset_time
-    const logicalDateStr = getLogicalDate().toISOString().split('T')[0];
-    formData.append('clientLogicalDate', logicalDateStr);
-
     try {
+      // 1. Client-Side OCR via Tesseract.js
+      const worker = await createWorker('eng', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            setOcrProgress({ status: 'Reading Screen Time...', progress: Math.round(m.progress * 100) });
+          } else {
+            setOcrProgress({ status: 'Loading AI Models...', progress: 10 });
+          }
+        }
+      });
+      
+      const { data: { text } } = await worker.recognize(file);
+      await worker.terminate();
+      
+      setOcrProgress({ status: 'Verifying with server...', progress: 100 });
+
+      // 2. Send to Server for DB Insertion
+      const logicalDateStr = getLogicalDate().toISOString().split('T')[0];
+      
       const res = await fetch('/api/ocr', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          groupId: room.id,
+          clientLogicalDate: logicalDateStr
+        }),
       });
+      
       const data = await res.json();
       
       if (res.ok) {
@@ -141,6 +163,8 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
     } catch (err) {
       setStatus('error');
       setErrorMsg(String(err));
+    } finally {
+      setOcrProgress(null);
     }
   };
 
@@ -265,6 +289,22 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
                         <CheckCircle className="w-10 h-10 text-green-400" />
                       </div>
                       <p className="text-white font-bold text-lg md:text-xl truncate max-w-xs mx-auto">{file.name}</p>
+                      
+                      {status === 'uploading' && ocrProgress && (
+                        <div className="w-full max-w-xs mx-auto mt-4">
+                          <div className="flex justify-between text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest">
+                            <span>{ocrProgress.status}</span>
+                            <span>{ocrProgress.progress}%</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-black/50 rounded-full overflow-hidden border border-white/5">
+                            <div 
+                              className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                              style={{ width: `${ocrProgress.progress}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      )}
+
                       <button 
                         onClick={(e) => { e.preventDefault(); handleUpload(); }}
                         disabled={status === 'uploading'}

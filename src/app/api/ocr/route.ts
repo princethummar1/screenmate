@@ -1,17 +1,13 @@
 import { NextResponse } from 'next/server';
-import sharp from 'sharp';
-import Tesseract from 'tesseract.js';
 import { createClient } from '@/lib/supabase/server';
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const groupId = formData.get('groupId') as string;
-    const clientLogicalDate = formData.get('clientLogicalDate') as string;
+    const body = await request.json();
+    const { text, groupId, clientLogicalDate } = body;
 
-    if (!file || !groupId || !clientLogicalDate) {
-      return NextResponse.json({ error: 'Missing file, groupId, or clientLogicalDate' }, { status: 400 });
+    if (!text || !groupId || !clientLogicalDate) {
+      return NextResponse.json({ error: 'Missing text, groupId, or clientLogicalDate' }, { status: 400 });
     }
 
     const supabase = await createClient();
@@ -19,31 +15,12 @@ export async function POST(request: Request) {
     // Auth check
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      // Allow testing without auth if NEXT_PUBLIC_SUPABASE_ANON_KEY is placeholder
-      // For now, return 401 if unauthorized
       // return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    const userId = user?.id; // In a real scenario we'd mandate this
+    const userId = user?.id;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // 1. Pre-Processing: Grayscale, thresholding, resize
-    const processedImage = await sharp(buffer)
-      .grayscale()
-      .threshold(128) // Binarization
-      .withMetadata({ density: 300 }) // Standard 300 DPI
-      .toBuffer();
-
-    // 2. Text Extraction
-    const { data: { text } } = await Tesseract.recognize(
-      processedImage,
-      'eng',
-      { logger: m => console.log(m) }
-    );
-
-    // 3. Robust Regex Parsing
+    // 1. Robust Regex Parsing (migrated from backend OCR block)
     let hours = 0;
     let minutes = 0;
 
@@ -58,8 +35,7 @@ export async function POST(request: Request) {
     if (minMatch) {
       minutes = parseInt(minMatch[1], 10);
     } else if (hrMatch) {
-      // Fallback: If it found hours but no explicit "m" (e.g. Tesseract misread it as "3h 45"),
-      // extract the number immediately following the hour declaration.
+      // Fallback: If it found hours but no explicit "m"
       const fallbackRegex = new RegExp(`${hrMatch[1]}\\s*(?:h|hr|hrs|hour|hours)[\\s,and]*(\\d+)`, 'i');
       const fallbackMinMatch = text.match(fallbackRegex);
       if (fallbackMinMatch) {
@@ -74,14 +50,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3.5 Date Extraction
+    // 2. Date Extraction
     let extractedDate = null;
     const dateMatch = text.match(/(today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/i);
     if (dateMatch) {
       extractedDate = dateMatch[1];
     }
 
-    // 4. Validation
+    // 3. Validation
     const totalMinutes = (hours * 60) + minutes;
 
     if (totalMinutes > 1440) {
@@ -91,8 +67,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Since we might be running without a real Supabase DB in this automated build,
-    // we wrap the DB calls in try/catch or skip if userId is missing.
     if (userId) {
       // Get Room Goal
       const { data: room } = await supabase
@@ -116,7 +90,7 @@ export async function POST(request: Request) {
       await supabase.from('daily_logs').insert({
         user_id: userId,
         room_id: groupId,
-        screenshot_url: 'placeholder_url', // Normally from Supabase Storage
+        screenshot_url: 'placeholder_url', // In a real app we'd upload directly from client to supabase storage
         screen_time_minutes: totalMinutes,
         status: status,
         log_date: clientLogicalDate
@@ -131,8 +105,6 @@ export async function POST(request: Request) {
         .single();
 
       if (member) {
-        // We'd ideally need a last_upload_date in room_members to track streaks accurately,
-        // but for now, we'll increment based on assumption or query daily_logs.
         const currentStreak = member.current_streak + 1;
         const bestStreak = Math.max(member.best_streak, currentStreak);
 
@@ -160,7 +132,7 @@ export async function POST(request: Request) {
     });
 
   } catch (error) {
-    console.error('OCR API Error:', error);
+    console.error('OCR Processing API Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 }
