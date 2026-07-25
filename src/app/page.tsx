@@ -118,6 +118,29 @@ export default async function Dashboard() {
             <EmptyState />
           </div>
         )}
+
+        <div className="pt-12 border-t border-white/10 pb-12">
+          <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+            <Trophy className="w-6 h-6 text-yellow-400" /> How Points Work
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-[#030303]/80 border border-white/10 rounded-3xl p-6 backdrop-blur-xl">
+              <div className="text-3xl font-black text-purple-400 mb-2">+20</div>
+              <h3 className="text-white font-bold mb-2">Base Points</h3>
+              <p className="text-sm text-gray-400">Earned simply for showing up and verifying your screen time every day.</p>
+            </div>
+            <div className="bg-[#030303]/80 border border-white/10 rounded-3xl p-6 backdrop-blur-xl">
+              <div className="text-3xl font-black text-green-400 mb-2">+100</div>
+              <h3 className="text-white font-bold mb-2">Goal Crusher</h3>
+              <p className="text-sm text-gray-400">A huge bonus awarded if your daily screen time is completely under the room's goal.</p>
+            </div>
+            <div className="bg-[#030303]/80 border border-white/10 rounded-3xl p-6 backdrop-blur-xl">
+              <div className="text-3xl font-black text-pink-400 mb-2">+1 / min</div>
+              <h3 className="text-white font-bold mb-2">Overachiever</h3>
+              <p className="text-sm text-gray-400">For every minute you are under your goal, you earn an extra point. The less you scroll, the more you earn!</p>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   );
