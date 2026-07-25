@@ -27,6 +27,7 @@ type Member = {
   username?: string;
   todayStatus?: 'verified' | 'over_goal' | 'pending';
   uploadTime?: string;
+  totalWastedMinutes?: number;
 };
 
 interface ActiveRoomProps {
@@ -45,7 +46,6 @@ interface ActiveRoomProps {
 export default function ActiveRoom({ room, members, currentUserId, historyLogs = [], allRoomLogs = [] }: ActiveRoomProps) {
   const [file, setFile] = useState<File | null>(null);
 
-  // Calculate Logical Date string dynamically on the client
   const getLogicalDateStr = () => {
     const now = new Date();
     const resetTime = room.reset_time || '00:00:00';
@@ -63,15 +63,30 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
   const clientLogicalToday = getLogicalDateStr();
   const clientTodayLog = historyLogs?.find(l => l.log_date === clientLogicalToday);
 
-  // Compute members with dynamic todayStatus based on clientLogicalToday
+  // Compute members with dynamic todayStatus and total lifetime wasted time
   const dynamicMembers = members.map(m => {
-    const log = allRoomLogs?.find(l => l.user_id === m.user_id && l.log_date === clientLogicalToday);
+    const userLogs = allRoomLogs?.filter(l => l.user_id === m.user_id) || [];
+    const logToday = userLogs.find(l => l.log_date === clientLogicalToday);
+    const totalWastedMinutes = userLogs.reduce((sum, l) => sum + (l.screen_time_minutes || 0), 0);
+    
     return {
       ...m,
-      todayStatus: log?.status as any || 'pending',
-      uploadTime: log?.created_at
+      todayStatus: logToday?.status as any || 'pending',
+      uploadTime: logToday?.created_at,
+      totalWastedMinutes
     };
   });
+
+  // Format minutes into d h m
+  const formatLifetimeMinutes = (total: number = 0) => {
+    if (!total) return "0h 0m";
+    const d = Math.floor(total / (24 * 60));
+    const h = Math.floor((total % (24 * 60)) / 60);
+    const m = total % 60;
+    
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    return `${h}h ${m}m`;
+  };
 
   const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'verified' | 'error'>(
     clientTodayLog ? 'verified' : 'idle'
@@ -407,8 +422,8 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
               <Activity className="w-4 h-4" /> 30-Day Analytics
             </h3>
-            <p className="text-xs text-gray-500 mb-6 font-medium">Your historical screen time mapped against the room goal.</p>
-            <HistoryChart logs={historyLogs} goalMinutes={room.goal_minutes} />
+            <p className="text-xs text-gray-500 mb-6 font-medium">Historical screen time of all members mapped against the room goal.</p>
+            <HistoryChart allRoomLogs={allRoomLogs} members={dynamicMembers} goalMinutes={room.goal_minutes} />
           </div>
 
         </div>
@@ -436,16 +451,22 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
 
               return (
                 <div key={member.user_id} className={`p-4 rounded-2xl border transition-all duration-300 flex items-center justify-between group ${isMe ? 'border-indigo-500/30 bg-indigo-500/10 shadow-[0_0_20px_rgba(99,102,241,0.1)]' : 'border-white/5 bg-black/40 hover:bg-white/5'}`}>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 min-w-0 flex-1">
                     {rankBadge}
-                    <div>
-                      <p className={`font-bold text-sm ${isMe ? 'text-white' : 'text-gray-300 group-hover:text-white transition-colors'}`}>
-                        {isMe ? 'You' : member.username}
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-bold text-sm truncate flex items-center gap-2 ${isMe ? 'text-white' : 'text-gray-300 group-hover:text-white transition-colors'}`}>
+                        {member.username} {isMe && <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full uppercase tracking-wider">You</span>}
                       </p>
+                      
                       <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                         <span className="text-xs text-orange-400 flex items-center gap-1 font-bold bg-orange-500/10 px-2 py-0.5 rounded-md border border-orange-500/20">
                           <Flame className="w-3 h-3" /> {member.current_streak}
                         </span>
+                        
+                        <span className="text-xs text-gray-400 flex items-center gap-1 font-bold bg-white/5 px-2 py-0.5 rounded-md border border-white/5" title="Total Lifetime Time Wasted">
+                          <Clock className="w-3 h-3 text-gray-500" /> {formatLifetimeMinutes(member.totalWastedMinutes)}
+                        </span>
+
                         {member.todayStatus === 'verified' && (
                           <div className="flex items-center gap-1.5 text-[10px] font-bold text-green-400 uppercase tracking-wider">
                             <span className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
@@ -467,7 +488,8 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
                       </div>
                     </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
+                  
+                  <div className="text-right flex-shrink-0 ml-4">
                     <p className={`font-black text-lg tracking-tight ${isMe ? 'text-indigo-400' : 'text-white'}`}>{member.total_points}</p>
                     <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">pts</p>
                   </div>
