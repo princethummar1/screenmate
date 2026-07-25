@@ -363,7 +363,7 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
         </div>
 
         {/* Right Column: Leaderboard */}
-        <div className="xl:col-span-1 rounded-3xl border border-white/10 bg-[#030303]/80 backdrop-blur-xl p-6 md:p-8 shadow-2xl flex flex-col h-[600px] xl:h-auto relative overflow-hidden">
+        <div className="xl:col-span-1 rounded-3xl border border-white/10 bg-[#030303]/80 backdrop-blur-xl p-5 md:p-8 shadow-2xl flex flex-col min-h-[400px] xl:min-h-0 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
           
           <h2 className="text-lg font-bold text-white mb-8 flex items-center gap-3 relative z-10">
