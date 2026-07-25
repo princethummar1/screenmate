@@ -25,7 +25,7 @@ type Member = {
   total_points: number;
   current_streak: number;
   username?: string;
-  todayStatus?: 'pending' | 'verified' | 'over_goal';
+  todayStatus?: 'verified' | 'over_goal' | 'pending';
   uploadTime?: string;
 };
 
@@ -39,15 +39,45 @@ interface ActiveRoomProps {
     created_at?: string;
   };
   historyLogs?: any[];
+  allRoomLogs?: any[];
 }
 
-export default function ActiveRoom({ room, members, currentUserId, todayLog, historyLogs = [] }: ActiveRoomProps) {
+export default function ActiveRoom({ room, members, currentUserId, historyLogs = [], allRoomLogs = [] }: ActiveRoomProps) {
   const [file, setFile] = useState<File | null>(null);
+
+  // Calculate Logical Date string dynamically on the client
+  const getLogicalDateStr = () => {
+    const now = new Date();
+    const resetTime = room.reset_time || '00:00:00';
+    const [h, m] = resetTime.split(':');
+    const resetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(h), parseInt(m));
+    if (now < resetDate) {
+      now.setDate(now.getDate() - 1);
+    }
+    const y = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${y}-${mm}-${dd}`;
+  };
+
+  const clientLogicalToday = getLogicalDateStr();
+  const clientTodayLog = historyLogs?.find(l => l.log_date === clientLogicalToday);
+
+  // Compute members with dynamic todayStatus based on clientLogicalToday
+  const dynamicMembers = members.map(m => {
+    const log = allRoomLogs?.find(l => l.user_id === m.user_id && l.log_date === clientLogicalToday);
+    return {
+      ...m,
+      todayStatus: log?.status as any || 'pending',
+      uploadTime: log?.created_at
+    };
+  });
+
   const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'verified' | 'error'>(
-    todayLog ? 'verified' : 'idle'
+    clientTodayLog ? 'verified' : 'idle'
   );
   const [result, setResult] = useState<{ totalMinutes: number, status: string, textExtracted?: string, extractedDate?: string } | null>(
-    todayLog ? { totalMinutes: todayLog.screen_time_minutes, status: todayLog.status } : null
+    clientTodayLog ? { totalMinutes: clientTodayLog.screen_time_minutes, status: clientTodayLog.status } : null
   );
   const [showShareModal, setShowShareModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -61,23 +91,6 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
   const daysElapsed = Math.floor(elapsed / (1000 * 60 * 60 * 24)) + 1;
   const daysRemaining = room.duration_days - daysElapsed;
   const progressPercent = Math.min(100, (daysElapsed / room.duration_days) * 100);
-
-  // Helper to get Logical Date based on reset_time
-  const getLogicalDate = () => {
-    const now = new Date();
-    const resetTime = room.reset_time || '00:00:00';
-    const [h, m] = resetTime.split(':');
-    
-    // Create a Date object for today's reset time
-    const resetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(h), parseInt(m));
-    
-    // If we are before the reset time, logically it is still "yesterday"
-    if (now < resetDate) {
-      now.setDate(now.getDate() - 1);
-    }
-    
-    return now;
-  };
 
   // Countdown timer for Reset Time
   useEffect(() => {
@@ -126,8 +139,6 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
       setOcrProgress({ status: 'Verifying with server...', progress: 100 });
 
       // 2. Send to Server for DB Insertion
-      const logicalDateStr = getLogicalDate().toISOString().split('T')[0];
-      
       const res = await fetch('/api/ocr', {
         method: 'POST',
         headers: {
@@ -136,7 +147,7 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
         body: JSON.stringify({
           text,
           groupId: room.id,
-          clientLogicalDate: logicalDateStr
+          clientLogicalDate: clientLogicalToday
         }),
       });
       
@@ -347,9 +358,9 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
                       OCR Date: {result.extractedDate}
                     </span>
                   )}
-                  {todayLog?.created_at && (
+                  {clientTodayLog?.created_at && (
                     <span className="text-xs font-bold text-gray-500 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                      Uploaded {formatUploadTime(todayLog.created_at)}
+                      Uploaded {formatUploadTime(clientTodayLog.created_at)}
                     </span>
                   )}
                 </div>
@@ -412,10 +423,10 @@ export default function ActiveRoom({ room, members, currentUserId, todayLog, his
           </h2>
 
           <div className="space-y-4 flex-1 relative z-10 overflow-y-auto pr-2 custom-scrollbar">
-            {members.length === 0 && (
+            {dynamicMembers.length === 0 && (
               <p className="text-gray-500 text-sm italic">No members found.</p>
             )}
-            {members.sort((a,b) => b.total_points - a.total_points).map((member, index) => {
+            {dynamicMembers.sort((a, b) => b.total_points - a.total_points).map((member, index) => {
               const isMe = member.user_id === currentUserId;
               
               let rankBadge = <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center font-bold text-xs text-gray-500 border border-white/10">{index + 1}</div>;

@@ -49,31 +49,18 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     `)
     .eq('room_id', room.id);
 
-  const today = new Date().toISOString().split('T')[0];
-  
-  // Fetch ALL logs for the user in this room to pass to history chart
-  const { data: userLogs } = await supabase
+  // Fetch all logs for this room to let the client handle timezone-accurate "logical today"
+  const { data: allLogs } = await supabase
     .from('daily_logs')
     .select('*')
-    .eq('user_id', user.id)
     .eq('room_id', room.id)
     .order('log_date', { ascending: true });
 
-  const todayLog = userLogs?.find(l => l.log_date === today);
-
-  // Optionally fetch today's status for all members to show in leaderboard
-  const { data: allLogsToday } = await supabase
-    .from('daily_logs')
-    .select('user_id, status, created_at')
-    .eq('room_id', room.id)
-    .eq('log_date', today);
+  const userLogs = allLogs?.filter(l => l.user_id === user.id) || [];
 
   const formattedMembers = (membersData || []).map(m => {
-    const log = allLogsToday?.find(l => l.user_id === m.user_id);
     return {
       ...m,
-      todayStatus: log?.status as any || 'pending',
-      uploadTime: log?.created_at,
       username: (m.profiles as any)?.username || 'Unknown Player'
     };
   });
@@ -84,8 +71,8 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
         room={room} 
         members={formattedMembers} 
         currentUserId={user.id} 
-        todayLog={todayLog || undefined} 
-        historyLogs={userLogs || []}
+        historyLogs={userLogs}
+        allRoomLogs={allLogs || []}
       />
     </main>
   );
