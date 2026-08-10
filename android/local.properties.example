@@ -1,0 +1,14 @@
+# This file is NOT checked into version control.
+# Copy this file to local.properties and fill in your credentials.
+
+sdk.dir=C:/Android/Sdk
+
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+
+TMDB_API_KEY=your-tmdb-v3-api-key
+TMDB_READ_ACCESS_TOKEN=your-tmdb-read-access-token
+
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_MODEL=google/gemini-2.0-flash-001
+GOOGLE_BOOKS_API_KEY=your-google-books-api-key
