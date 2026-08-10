@@ -30,13 +30,18 @@ interface HistoryChartProps {
   allRoomLogs: Log[];
   members: Member[];
   goalMinutes: number;
+  roomStartDate?: string;
 }
 
 // A vibrant color palette for different players
 const CHART_COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-export default function HistoryChart({ allRoomLogs = [], members = [], goalMinutes }: HistoryChartProps) {
-  if (!allRoomLogs || allRoomLogs.length === 0) {
+export default function HistoryChart({ allRoomLogs = [], members = [], goalMinutes, roomStartDate }: HistoryChartProps) {
+  const filteredLogs = roomStartDate
+    ? allRoomLogs.filter(l => l.log_date >= roomStartDate)
+    : allRoomLogs;
+
+  if (!filteredLogs || filteredLogs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 border border-white/5 bg-white/[0.02] rounded-3xl">
         <p className="text-gray-500 font-medium">No history available yet.</p>
@@ -46,7 +51,7 @@ export default function HistoryChart({ allRoomLogs = [], members = [], goalMinut
   }
 
   // 1. Extract unique dates and sort chronologically
-  const uniqueDates = Array.from(new Set(allRoomLogs.map(l => l.log_date))).sort();
+  const uniqueDates = Array.from(new Set(filteredLogs.map(l => l.log_date))).sort();
 
   // 2. Build flattened data array for Recharts
   const data = uniqueDates.map(dateStr => {
@@ -62,7 +67,7 @@ export default function HistoryChart({ allRoomLogs = [], members = [], goalMinut
 
     // For this specific date, attach each member's screen time
     members.forEach(member => {
-      const memberLog = allRoomLogs.find(l => l.user_id === member.user_id && l.log_date === dateStr);
+      const memberLog = filteredLogs.find(l => l.user_id === member.user_id && l.log_date === dateStr);
       if (memberLog) {
         dayObj[member.user_id] = memberLog.screen_time_minutes;
       }

@@ -63,11 +63,13 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
   const clientLogicalToday = getLogicalDateStr();
   const clientTodayLog = historyLogs?.find(l => l.log_date === clientLogicalToday);
 
-  // Compute members with dynamic todayStatus and total lifetime wasted time
+  // Compute members with dynamic todayStatus and total wasted time (only from room start date)
   const dynamicMembers = members.map(m => {
     const userLogs = allRoomLogs?.filter(l => l.user_id === m.user_id) || [];
     const logToday = userLogs.find(l => l.log_date === clientLogicalToday);
-    const totalWastedMinutes = userLogs.reduce((sum, l) => sum + (l.screen_time_minutes || 0), 0);
+    const totalWastedMinutes = userLogs
+      .filter(l => l.log_date >= room.start_date)
+      .reduce((sum, l) => sum + (l.screen_time_minutes || 0), 0);
     
     return {
       ...m,
@@ -420,10 +422,10 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
           {/* Analytics History Chart Card */}
           <div className="rounded-3xl border border-white/10 bg-[#030303]/80 backdrop-blur-xl p-6 md:p-8 shadow-2xl relative overflow-hidden flex-1">
             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-              <Activity className="w-4 h-4" /> 30-Day Analytics
+              <Activity className="w-4 h-4" /> Analytics Since Room Start
             </h3>
             <p className="text-xs text-gray-500 mb-6 font-medium">Historical screen time of all members mapped against the room goal.</p>
-            <HistoryChart allRoomLogs={allRoomLogs} members={dynamicMembers} goalMinutes={room.goal_minutes} />
+            <HistoryChart allRoomLogs={allRoomLogs} members={dynamicMembers} goalMinutes={room.goal_minutes} roomStartDate={room.start_date} />
           </div>
 
         </div>
@@ -463,7 +465,7 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
                           <Flame className="w-3 h-3" /> {member.current_streak}
                         </span>
                         
-                        <span className="text-xs text-gray-400 flex items-center gap-1 font-bold bg-white/5 px-2 py-0.5 rounded-md border border-white/5" title="Total Lifetime Time Wasted">
+                        <span className="text-xs text-gray-400 flex items-center gap-1 font-bold bg-white/5 px-2 py-0.5 rounded-md border border-white/5" title="Total Time Since Room Start">
                           <Clock className="w-3 h-3 text-gray-500" /> {formatLifetimeMinutes(member.totalWastedMinutes)}
                         </span>
 
