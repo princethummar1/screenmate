@@ -18,6 +18,7 @@ import com.screenmate.app.ScreenMateApplication
 import com.screenmate.app.core.ui.theme.*
 import com.screenmate.app.core.util.DateUtils
 import com.screenmate.app.core.util.FallbackCommentary
+import com.screenmate.app.usage.SyncScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
@@ -48,6 +49,12 @@ class DashboardViewModel : ViewModel() {
 
     private val _hasJournalToday = MutableStateFlow(false)
     val hasJournalToday = _hasJournalToday.asStateFlow()
+
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus = _syncStatus.asStateFlow()
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing = _isSyncing.asStateFlow()
 
     fun loadData(context: android.content.Context) {
         viewModelScope.launch {
@@ -91,6 +98,59 @@ class DashboardViewModel : ViewModel() {
     fun refreshCommentary() {
         _aiCommentary.value = FallbackCommentary.generateFallback((_todayTime.value / 60).toInt(), null, _unlocks.value)
     }
+
+    fun syncSite(context: android.content.Context) {
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            _isSyncing.value = true
+            _syncStatus.value = "Collecting screen time..."
+            try {
+                // Step 1: Collect fresh usage data
+                val collector = com.screenmate.app.usage.UsageCollector
+                if (!collector.hasUsageAccess(context)) {
+                    _syncStatus.value = "Usage access not granted"
+                    _isSyncing.value = false
+                    return@launch
+                }
+
+                val app = context.applicationContext as ScreenMateApplication
+                val db = app.database
+                val today = DateUtils.todayDate()
+                val dailyData = collector.getDailyUsage(context, today)
+
+                if (dailyData != null) {
+                    val existing = db.dailyUsageDao().getByDateDirect(today)
+                    val entity = com.screenmate.app.core.database.entity.DailyUsageEntity(
+                        id = existing?.id ?: 0,
+                        usageDate = today,
+                        totalScreenTimeSeconds = dailyData.totalScreenTimeSeconds,
+                        unlockCount = dailyData.unlockCount,
+                        appOpenCount = dailyData.appOpenCount,
+                        firstUsageAt = dailyData.firstUsageAt?.let { DateUtils.formatTime(it) },
+                        lastUsageAt = dailyData.lastUsageAt?.let { DateUtils.formatTime(it) },
+                        timezone = existing?.timezone ?: java.util.TimeZone.getDefault().id,
+                        syncedToScreenMate = existing?.syncedToScreenMate ?: false,
+                        syncedToCloud = false, // Mark unsynced so worker picks it up
+                        createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    db.dailyUsageDao().insert(entity)
+                }
+
+                // Step 2: Trigger sync to Supabase
+                _syncStatus.value = "Syncing to site..."
+                SyncScheduler.scheduleImmediateSync(context)
+
+                _syncStatus.value = "Sync started! Points will update shortly."
+                _todayTime.value = dailyData?.totalScreenTimeSeconds ?: _todayTime.value
+                _unlocks.value = dailyData?.unlockCount ?: _unlocks.value
+            } catch (e: Exception) {
+                _syncStatus.value = "Sync failed: ${e.message}"
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
 }
 
 @Composable
@@ -115,6 +175,8 @@ fun DashboardScreen(
     val watchingTitle by viewModel.currentWatchingTitle.collectAsState()
     val readingTitle by viewModel.currentReadingTitle.collectAsState()
     val hasJournal by viewModel.hasJournalToday.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
 
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greeting = when (hour) {
@@ -140,6 +202,49 @@ fun DashboardScreen(
             )
             Text(DateUtils.todayDate(), color = TextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Sync Site", color = AccentPrimary, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        if (isSyncing) {
+                            Text("Syncing...", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        } else if (syncStatus != null) {
+                            Text(syncStatus!!, color = AccentPrimary, style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            Text("Sync screen time & points to site", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Button(
+                        onClick = { viewModel.syncSite(context) },
+                        enabled = !isSyncing,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentPrimary)
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = DarkBackground,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Sync Now", color = DarkBackground)
+                        }
+                    }
+                }
+            }
         }
 
         item {

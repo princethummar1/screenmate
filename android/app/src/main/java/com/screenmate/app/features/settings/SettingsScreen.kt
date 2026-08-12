@@ -45,11 +45,26 @@ class SettingsViewModel : ViewModel() {
     private val _aiEnabled = MutableStateFlow(true)
     val aiEnabled = _aiEnabled.asStateFlow()
 
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing = _isSyncing.asStateFlow()
+
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus = _syncStatus.asStateFlow()
+
+    private val _lastSyncTime = MutableStateFlow("")
+    val lastSyncTime = _lastSyncTime.asStateFlow()
+
     fun load(context: android.content.Context) {
         val prefs = (context.applicationContext as ScreenMateApplication).preferences
         _username.value = prefs.username.takeIf { it.isNotEmpty() } ?: "Unknown User"
         _hasUsageAccess.value = UsageCollector.hasUsageAccess(context)
         _aiEnabled.value = prefs.aiCommentaryEnabled
+
+        val lastSync = prefs.lastSyncTimestamp
+        _lastSyncTime.value = if (lastSync > 0) {
+            val sdf = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
+            sdf.format(java.util.Date(lastSync))
+        } else "Never"
 
         val db = (context.applicationContext as ScreenMateApplication).database
         viewModelScope.launch {
@@ -136,7 +151,54 @@ class SettingsViewModel : ViewModel() {
     }
 
     fun triggerSync(context: android.content.Context) {
-        SyncScheduler.scheduleImmediateSync(context)
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            _isSyncing.value = true
+            _syncStatus.value = "Collecting screen time..."
+
+            try {
+                val app = context.applicationContext as ScreenMateApplication
+                val db = app.database
+                val prefs = app.preferences
+
+                // Step 1: Collect fresh usage data
+                if (UsageCollector.hasUsageAccess(context)) {
+                    val today = com.screenmate.app.core.util.DateUtils.todayDate()
+                    val dailyData = UsageCollector.getDailyUsage(context, today)
+                    if (dailyData != null) {
+                        val existing = db.dailyUsageDao().getByDateDirect(today)
+                        val entity = com.screenmate.app.core.database.entity.DailyUsageEntity(
+                            id = existing?.id ?: 0,
+                            usageDate = today,
+                            totalScreenTimeSeconds = dailyData.totalScreenTimeSeconds,
+                            unlockCount = dailyData.unlockCount,
+                            appOpenCount = dailyData.appOpenCount,
+                            firstUsageAt = dailyData.firstUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) },
+                            lastUsageAt = dailyData.lastUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) },
+                            timezone = existing?.timezone ?: java.util.TimeZone.getDefault().id,
+                            syncedToScreenMate = existing?.syncedToScreenMate ?: false,
+                            syncedToCloud = false,
+                            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        db.dailyUsageDao().insert(entity)
+                    }
+                }
+
+                // Step 2: Trigger sync to Supabase
+                _syncStatus.value = "Syncing to site..."
+                SyncScheduler.scheduleImmediateSync(context)
+
+                _syncStatus.value = "Sync started! Points will update shortly."
+                prefs.lastSyncTimestamp = System.currentTimeMillis()
+                val sdf = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
+                _lastSyncTime.value = sdf.format(java.util.Date())
+            } catch (e: Exception) {
+                _syncStatus.value = "Sync failed: ${e.message}"
+            } finally {
+                _isSyncing.value = false
+            }
+        }
     }
 
     fun signOut(context: android.content.Context, onNavigateToLogin: () -> Unit) {
@@ -168,6 +230,9 @@ fun SettingsScreen(
     val hasUsageAccess by viewModel.hasUsageAccess.collectAsState()
     val rooms by viewModel.rooms.collectAsState()
     val aiEnabled by viewModel.aiEnabled.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val lastSyncTime by viewModel.lastSyncTime.collectAsState()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(DarkBackground).padding(16.dp)
@@ -212,9 +277,30 @@ fun SettingsScreen(
         
         item {
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = { viewModel.triggerSync(context) }, colors = ButtonDefaults.buttonColors(containerColor = AccentPrimary)) {
-                Text("Sync Now", color = DarkBackground)
+            Button(
+                onClick = { viewModel.triggerSync(context) },
+                enabled = !isSyncing,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentPrimary),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = DarkBackground,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Syncing...", color = DarkBackground)
+                } else {
+                    Text("Sync Site Now", color = DarkBackground)
+                }
             }
+            Spacer(modifier = Modifier.height(4.dp))
+            if (syncStatus != null) {
+                Text(syncStatus!!, color = AccentPrimary, style = MaterialTheme.typography.bodySmall)
+            }
+            Text("Last synced: $lastSyncTime", color = TextTertiary, style = MaterialTheme.typography.bodySmall)
+            Text("Collects screen time, syncs to site, and calculates points. Midnight updates also happen automatically.", color = TextSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             Spacer(modifier = Modifier.height(24.dp))
         }
 
