@@ -154,42 +154,61 @@ class SettingsViewModel : ViewModel() {
         if (_isSyncing.value) return
         viewModelScope.launch {
             _isSyncing.value = true
-            _syncStatus.value = "Collecting screen time..."
+            _syncStatus.value = "Checking screen time..."
 
             try {
                 val app = context.applicationContext as ScreenMateApplication
                 val db = app.database
                 val prefs = app.preferences
 
-                // Step 1: Collect fresh usage data
-                if (UsageCollector.hasUsageAccess(context)) {
-                    val today = com.screenmate.app.core.util.DateUtils.todayDate()
-                    val dailyData = UsageCollector.getDailyUsage(context, today)
-                    if (dailyData != null) {
-                        val existing = db.dailyUsageDao().getByDateDirect(today)
+                if (!UsageCollector.hasUsageAccess(context)) {
+                    _syncStatus.value = "Usage access not granted"
+                    _isSyncing.value = false
+                    return@launch
+                }
+
+                val daysToCheck = 4
+                var updatedCount = 0
+
+                for (i in 0 until daysToCheck) {
+                    val targetDate = com.screenmate.app.core.util.DateUtils.daysAgo(i)
+                    _syncStatus.value = "Checking ${if (i == 0) "today" else "${i}d ago"}..."
+
+                    val phoneData = UsageCollector.getDailyUsage(context, targetDate)
+                    val localData = db.dailyUsageDao().getByDateDirect(targetDate)
+
+                    val phoneMinutes = phoneData?.totalScreenTimeSeconds ?: 0L
+                    val localMinutes = localData?.totalScreenTimeSeconds ?: 0L
+
+                    if (localData == null || phoneMinutes != localMinutes) {
                         val entity = com.screenmate.app.core.database.entity.DailyUsageEntity(
-                            id = existing?.id ?: 0,
-                            usageDate = today,
-                            totalScreenTimeSeconds = dailyData.totalScreenTimeSeconds,
-                            unlockCount = dailyData.unlockCount,
-                            appOpenCount = dailyData.appOpenCount,
-                            firstUsageAt = dailyData.firstUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) },
-                            lastUsageAt = dailyData.lastUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) },
-                            timezone = existing?.timezone ?: java.util.TimeZone.getDefault().id,
-                            syncedToScreenMate = existing?.syncedToScreenMate ?: false,
+                            id = localData?.id ?: 0,
+                            usageDate = targetDate,
+                            totalScreenTimeSeconds = phoneMinutes,
+                            unlockCount = phoneData?.unlockCount ?: localData?.unlockCount ?: 0,
+                            appOpenCount = phoneData?.appOpenCount ?: localData?.appOpenCount ?: 0,
+                            firstUsageAt = phoneData?.firstUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) } ?: localData?.firstUsageAt,
+                            lastUsageAt = phoneData?.lastUsageAt?.let { com.screenmate.app.core.util.DateUtils.formatTime(it) } ?: localData?.lastUsageAt,
+                            timezone = localData?.timezone ?: java.util.TimeZone.getDefault().id,
+                            syncedToScreenMate = localData?.syncedToScreenMate ?: false,
                             syncedToCloud = false,
-                            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                            createdAt = localData?.createdAt ?: System.currentTimeMillis(),
                             updatedAt = System.currentTimeMillis()
                         )
                         db.dailyUsageDao().insert(entity)
+                        updatedCount++
                     }
                 }
 
-                // Step 2: Trigger sync to Supabase
-                _syncStatus.value = "Syncing to site..."
+                _syncStatus.value = if (updatedCount > 0) {
+                    "Updated $updatedCount day(s). Syncing to site..."
+                } else {
+                    "All days up to date. Syncing..."
+                }
+
                 SyncScheduler.scheduleImmediateSync(context)
 
-                _syncStatus.value = "Sync started! Points will update shortly."
+                _syncStatus.value = "Done! $updatedCount day(s) updated. Points will refresh."
                 prefs.lastSyncTimestamp = System.currentTimeMillis()
                 val sdf = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
                 _lastSyncTime.value = sdf.format(java.util.Date())

@@ -103,9 +103,8 @@ class DashboardViewModel : ViewModel() {
         if (_isSyncing.value) return
         viewModelScope.launch {
             _isSyncing.value = true
-            _syncStatus.value = "Collecting screen time..."
+            _syncStatus.value = "Checking screen time..."
             try {
-                // Step 1: Collect fresh usage data
                 val collector = com.screenmate.app.usage.UsageCollector
                 if (!collector.hasUsageAccess(context)) {
                     _syncStatus.value = "Usage access not granted"
@@ -115,35 +114,52 @@ class DashboardViewModel : ViewModel() {
 
                 val app = context.applicationContext as ScreenMateApplication
                 val db = app.database
-                val today = DateUtils.todayDate()
-                val dailyData = collector.getDailyUsage(context, today)
+                val daysToCheck = 4 // Check last 4 days
+                var updatedCount = 0
 
-                if (dailyData != null) {
-                    val existing = db.dailyUsageDao().getByDateDirect(today)
-                    val entity = com.screenmate.app.core.database.entity.DailyUsageEntity(
-                        id = existing?.id ?: 0,
-                        usageDate = today,
-                        totalScreenTimeSeconds = dailyData.totalScreenTimeSeconds,
-                        unlockCount = dailyData.unlockCount,
-                        appOpenCount = dailyData.appOpenCount,
-                        firstUsageAt = dailyData.firstUsageAt?.let { DateUtils.formatTime(it) },
-                        lastUsageAt = dailyData.lastUsageAt?.let { DateUtils.formatTime(it) },
-                        timezone = existing?.timezone ?: java.util.TimeZone.getDefault().id,
-                        syncedToScreenMate = existing?.syncedToScreenMate ?: false,
-                        syncedToCloud = false, // Mark unsynced so worker picks it up
-                        createdAt = existing?.createdAt ?: System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    db.dailyUsageDao().insert(entity)
+                for (i in 0 until daysToCheck) {
+                    val targetDate = DateUtils.daysAgo(i)
+                    _syncStatus.value = "Checking ${if (i == 0) "today" else "${i}d ago"}..."
+
+                    val phoneData = collector.getDailyUsage(context, targetDate)
+                    val localData = db.dailyUsageDao().getByDateDirect(targetDate)
+
+                    val phoneMinutes = phoneData?.totalScreenTimeSeconds ?: 0L
+                    val localMinutes = localData?.totalScreenTimeSeconds ?: 0L
+
+                    // Update if: no local record exists, or phone data differs from local
+                    if (localData == null || phoneMinutes != localMinutes) {
+                        val entity = com.screenmate.app.core.database.entity.DailyUsageEntity(
+                            id = localData?.id ?: 0,
+                            usageDate = targetDate,
+                            totalScreenTimeSeconds = phoneMinutes,
+                            unlockCount = phoneData?.unlockCount ?: localData?.unlockCount ?: 0,
+                            appOpenCount = phoneData?.appOpenCount ?: localData?.appOpenCount ?: 0,
+                            firstUsageAt = phoneData?.firstUsageAt?.let { DateUtils.formatTime(it) } ?: localData?.firstUsageAt,
+                            lastUsageAt = phoneData?.lastUsageAt?.let { DateUtils.formatTime(it) } ?: localData?.lastUsageAt,
+                            timezone = localData?.timezone ?: java.util.TimeZone.getDefault().id,
+                            syncedToScreenMate = localData?.syncedToScreenMate ?: false,
+                            syncedToCloud = false, // Mark unsynced
+                            createdAt = localData?.createdAt ?: System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        db.dailyUsageDao().insert(entity)
+                        updatedCount++
+                    }
                 }
 
-                // Step 2: Trigger sync to Supabase
-                _syncStatus.value = "Syncing to site..."
-                SyncScheduler.scheduleImmediateSync(context)
+                _syncStatus.value = if (updatedCount > 0) {
+                    "Updated $updatedCount day(s). Syncing to site..."
+                } else {
+                    "All days up to date. Syncing..."
+                }
 
-                _syncStatus.value = "Sync started! Points will update shortly."
-                _todayTime.value = dailyData?.totalScreenTimeSeconds ?: _todayTime.value
-                _unlocks.value = dailyData?.unlockCount ?: _unlocks.value
+                // Trigger background sync to Supabase
+                com.screenmate.app.usage.SyncScheduler.scheduleImmediateSync(context)
+
+                _syncStatus.value = "Done! $updatedCount day(s) updated. Points will refresh."
+                _todayTime.value = db.dailyUsageDao().getByDateDirect(DateUtils.todayDate())?.totalScreenTimeSeconds ?: _todayTime.value
+                _unlocks.value = db.dailyUsageDao().getByDateDirect(DateUtils.todayDate())?.unlockCount ?: _unlocks.value
             } catch (e: Exception) {
                 _syncStatus.value = "Sync failed: ${e.message}"
             } finally {
