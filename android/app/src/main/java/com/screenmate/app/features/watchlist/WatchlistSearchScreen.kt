@@ -99,7 +99,8 @@ class WatchlistSearchViewModel(application: Application) : AndroidViewModel(appl
                 isFavorite = false,
                 isManual = false,
                 createdAt = System.currentTimeMillis(),
-                updatedAt = System.currentTimeMillis()
+                updatedAt = System.currentTimeMillis(),
+                ownerUserId = owner
             )
             mediaDao.insert(entity)
             _message.value = "\"${result.displayTitle}\" added to watchlist!"

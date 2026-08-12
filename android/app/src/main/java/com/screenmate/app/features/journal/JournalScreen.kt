@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import com.screenmate.app.core.database.entity.JournalEntryEntity
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.time.YearMonth
@@ -34,6 +35,12 @@ fun JournalScreen(
         topBar = { TopAppBar(title = { Text("Journal") }) },
         floatingActionButton = { FloatingActionButton(onClick = { onNavigateToToday() }) { Text("Write Today") } }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {}
+        Column(
+            modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Your Journal entries will appear here.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

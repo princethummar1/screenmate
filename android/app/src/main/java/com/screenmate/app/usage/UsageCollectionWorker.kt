@@ -35,7 +35,11 @@ class UsageCollectionWorker(
             if (dailyData != null) {
                 val existing = database.dailyUsageDao().getByDateDirect(targetDate)
                 val syncedToScreenMate = existing?.syncedToScreenMate ?: false
-                val syncedToCloud = existing?.syncedToCloud ?: false
+                var syncedToCloud = existing?.syncedToCloud ?: false
+                
+                if (existing != null && existing.totalScreenTimeSeconds != dailyData.totalScreenTimeSeconds) {
+                    syncedToCloud = false
+                }
                 
                 // Delete old app usage if updating
                 if (existing != null) {

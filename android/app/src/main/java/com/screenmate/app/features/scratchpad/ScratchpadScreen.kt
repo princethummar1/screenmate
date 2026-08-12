@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
+import androidx.compose.ui.unit.dp
 
 class ScratchpadViewModel : ViewModel() {}
 
@@ -18,6 +19,12 @@ fun ScratchpadScreen(
         topBar = { TopAppBar(title = { Text("Scratchpad") }) },
         floatingActionButton = { FloatingActionButton(onClick = { onNavigateToNewNote() }) { Text("+") } }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {}
+        Column(
+            modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Your notes will appear here.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

@@ -122,7 +122,8 @@ object UsageCollector {
 
         // Handle case where app is still open at the end of the queried time range
         if (currentForegroundApp != null) {
-            val sessionDuration = endMillis - currentAppStartTime
+            val actualEnd = minOf(endMillis, System.currentTimeMillis())
+            val sessionDuration = actualEnd - currentAppStartTime
             if (sessionDuration > 0) {
                 appUsageMap[currentForegroundApp!!] = (appUsageMap[currentForegroundApp!!] ?: 0L) + sessionDuration
             }
