@@ -186,7 +186,16 @@ fun AppNavHost() {
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
-            composable(Screen.Reading.route) { com.screenmate.app.features.reading.ReadingListScreen() }
+            composable(Screen.Reading.route) {
+                com.screenmate.app.features.reading.ReadingListScreen(
+                    onNavigateToSearch = { navController.navigate(Screen.BookSearch.route) }
+                )
+            }
+            composable(Screen.BookSearch.route) {
+                com.screenmate.app.features.reading.BookSearchScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
             composable(Screen.Playlists.route) { com.screenmate.app.features.playlists.PlaylistsScreen() }
             composable(
                 route = Screen.PlaylistDetail.route + "/{id}",

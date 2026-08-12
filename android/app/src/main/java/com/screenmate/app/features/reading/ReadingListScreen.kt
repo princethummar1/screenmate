@@ -8,11 +8,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.screenmate.app.ScreenMateApplication
 import com.screenmate.app.core.database.entity.ReadingItemEntity
+import com.screenmate.app.core.ui.theme.*
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -61,22 +63,48 @@ class ReadingViewModel(application: Application) : AndroidViewModel(application)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReadingListScreen(viewModel: ReadingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
+fun ReadingListScreen(
+    onNavigateToSearch: () -> Unit = {},
+    viewModel: ReadingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
     var showAddDialog by remember { mutableStateOf(false) }
     val items by viewModel.items.collectAsState()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Reading List") }) },
-        floatingActionButton = { FloatingActionButton(onClick = { showAddDialog = true }) { Text("+") } }
+        topBar = {
+            TopAppBar(
+                title = { Text("Reading List", color = TextPrimary) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onNavigateToSearch,
+                containerColor = AccentPrimary
+            ) {
+                Text("+", color = DarkBackground)
+            }
+        },
+        containerColor = DarkBackground
     ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
-            items(items) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(item.title, style = MaterialTheme.typography.titleMedium)
-                        item.author?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (items.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No books yet.\nTap + to search and add.", color = TextSecondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        } else {
+            LazyColumn(modifier = Modifier.padding(padding)) {
+                items(items) { item ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(item.title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            item.author?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = TextSecondary) }
+                        }
                     }
                 }
             }

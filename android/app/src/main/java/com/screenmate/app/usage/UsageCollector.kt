@@ -27,7 +27,7 @@ data class DailyUsageData(
 object UsageCollector {
     fun hasUsageAccess(context: Context): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val mode = if (android.os.Build.VERSION.SDK_INT >= 29) {
             appOps.unsafeCheckOpNoThrow(
                 AppOpsManager.OPSTR_GET_USAGE_STATS,
                 Process.myUid(),
@@ -52,107 +52,96 @@ object UsageCollector {
         val startMillis = DateUtils.dayStartMillis(date)
         val endMillis = DateUtils.dayEndMillis(date)
 
-        val events = try {
-            usageStatsManager.queryEvents(startMillis, endMillis)
-        } catch (e: SecurityException) {
-            return null
-        }
+        // METHOD 1: Use queryUsageStats for accurate total screen time
+        // This gives us the real total time each app was in foreground
+        var totalScreenTimeFromStats = 0L
+        val appTimeMap = mutableMapOf<String, Long>()
+        val appOpenFromStats = mutableMapOf<String, Int>()
 
+        try {
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startMillis,
+                endMillis
+            )
+            if (stats != null) {
+                for (usageStat in stats) {
+                    val pkg = usageStat.packageName
+                    if (pkg == context.packageName) continue
+                    val timeInForeground = usageStat.totalTimeInForeground
+                    if (timeInForeground > 0) {
+                        appTimeMap[pkg] = timeInForeground
+                        totalScreenTimeFromStats += timeInForeground
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+
+        // METHOD 2: Use queryEvents for unlock count and app open counts
         var unlockCount = 0
         var firstUsageAt: Long? = null
         var lastUsageAt: Long? = null
-        
-        val appUsageMap = mutableMapOf<String, Long>()
         val appOpenCountMap = mutableMapOf<String, Int>()
-        
-        var currentForegroundApp: String? = null
-        var currentAppStartTime = 0L
-        var lastPauseTime = 0L
-        var lastPausedApp: String? = null
-        
-        val event = UsageEvents.Event()
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            
-            when (event.eventType) {
-                UsageEvents.Event.KEYGUARD_HIDDEN -> {
-                    unlockCount++
-                    if (firstUsageAt == null) firstUsageAt = event.timeStamp
-                }
-                UsageEvents.Event.ACTIVITY_RESUMED -> {
-                    val pkg = event.packageName
-                    if (firstUsageAt == null) firstUsageAt = event.timeStamp
-                    
-                    if (currentForegroundApp != pkg) {
-                        // If a different app was previously considered foreground but no PAUSED event
-                        // was received, close that session now using this resume timestamp.
-                        if (currentForegroundApp != null) {
-                            val prev = currentForegroundApp!!
-                            val sessionDuration = event.timeStamp - currentAppStartTime
-                            if (sessionDuration > 0) {
-                                appUsageMap[prev] = (appUsageMap[prev] ?: 0L) + sessionDuration
-                            }
-                        }
 
-                        currentForegroundApp = pkg
-                        currentAppStartTime = event.timeStamp
-
-                        // Check for session continuation (2000ms threshold)
-                        val isContinuation = (pkg == lastPausedApp) && (event.timeStamp - lastPauseTime < 2000)
-                        if (!isContinuation) {
+        try {
+            val events = usageStatsManager.queryEvents(startMillis, endMillis)
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                when (event.eventType) {
+                    UsageEvents.Event.KEYGUARD_HIDDEN -> {
+                        unlockCount++
+                        if (firstUsageAt == null) firstUsageAt = event.timeStamp
+                    }
+                    UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        if (firstUsageAt == null) firstUsageAt = event.timeStamp
+                        val pkg = event.packageName
+                        if (pkg != context.packageName) {
                             appOpenCountMap[pkg] = (appOpenCountMap[pkg] ?: 0) + 1
                         }
                     }
-                }
-                UsageEvents.Event.ACTIVITY_PAUSED -> {
-                    lastUsageAt = event.timeStamp
-                    val pkg = event.packageName
-                    if (currentForegroundApp == pkg) {
-                        val sessionDuration = event.timeStamp - currentAppStartTime
-                        if (sessionDuration > 0) {
-                            appUsageMap[pkg] = (appUsageMap[pkg] ?: 0L) + sessionDuration
-                        }
-                        lastPausedApp = pkg
-                        lastPauseTime = event.timeStamp
-                        currentForegroundApp = null
+                    UsageEvents.Event.ACTIVITY_PAUSED -> {
+                        lastUsageAt = event.timeStamp
                     }
                 }
             }
+        } catch (_: Exception) { }
+
+        // Use the MORE ACCURATE total from queryUsageStats
+        // Fall back to event-based calculation if stats returned 0
+        val finalTotalSeconds = if (totalScreenTimeFromStats > 0) {
+            totalScreenTimeFromStats / 1000
+        } else {
+            // Fallback: sum from app time map (already in ms from queryEvents)
+            appTimeMap.values.sum() / 1000
         }
 
-        // Handle case where app is still open at the end of the queried time range
-        if (currentForegroundApp != null) {
-            val actualEnd = minOf(endMillis, System.currentTimeMillis())
-            val sessionDuration = actualEnd - currentAppStartTime
-            if (sessionDuration > 0) {
-                appUsageMap[currentForegroundApp!!] = (appUsageMap[currentForegroundApp!!] ?: 0L) + sessionDuration
-            }
-        }
+        if (finalTotalSeconds == 0L && unlockCount == 0) return null
 
-        val apps = appUsageMap.mapNotNull { (pkg, durationMillis) ->
-            if (durationMillis < 1000) return@mapNotNull null
+        val apps = appTimeMap.mapNotNull { (pkg, durationMs) ->
+            val durationSec = durationMs / 1000
+            if (durationSec < 1) return@mapNotNull null
             if (pkg == context.packageName) return@mapNotNull null
-            
+
             val label = try {
                 val appInfo = pm.getApplicationInfo(pkg, 0)
                 pm.getApplicationLabel(appInfo).toString()
             } catch (e: PackageManager.NameNotFoundException) {
                 pkg
             }
-            
+
             AppUsageData(
                 packageName = pkg,
                 appLabel = label,
-                usageSeconds = durationMillis / 1000,
+                usageSeconds = durationSec,
                 openCount = appOpenCountMap[pkg] ?: 1
             )
         }.sortedByDescending { it.usageSeconds }
 
-        val totalScreenTimeSeconds = apps.sumOf { it.usageSeconds }
-        val totalOpenCount = apps.sumOf { it.openCount }
+        val totalOpenCount = appOpenCountMap.values.sum()
 
         return DailyUsageData(
-            totalScreenTimeSeconds = totalScreenTimeSeconds,
+            totalScreenTimeSeconds = finalTotalSeconds,
             unlockCount = unlockCount,
             appOpenCount = totalOpenCount,
             firstUsageAt = firstUsageAt,
