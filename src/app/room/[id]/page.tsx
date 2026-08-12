@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import ActiveRoom from '@/components/ActiveRoom';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
   const roomId = resolvedParams.id;

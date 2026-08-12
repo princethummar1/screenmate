@@ -4,6 +4,7 @@ import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Process
 import com.screenmate.app.core.util.DateUtils
@@ -25,6 +26,22 @@ data class DailyUsageData(
 )
 
 object UsageCollector {
+    private fun shouldCountPackage(context: Context, packageName: String): Boolean {
+        if (packageName == context.packageName) return false
+
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent == null) return false
+
+        return try {
+            val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+            val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            val isUpdatedSystemApp = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            !isSystemApp || isUpdatedSystemApp
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
     fun hasUsageAccess(context: Context): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = if (android.os.Build.VERSION.SDK_INT >= 29) {
@@ -67,7 +84,7 @@ object UsageCollector {
             if (stats != null) {
                 for (usageStat in stats) {
                     val pkg = usageStat.packageName
-                    if (pkg == context.packageName) continue
+                    if (!shouldCountPackage(context, pkg)) continue
                     val timeInForeground = usageStat.totalTimeInForeground
                     if (timeInForeground > 0) {
                         appTimeMap[pkg] = timeInForeground
@@ -96,7 +113,7 @@ object UsageCollector {
                     UsageEvents.Event.ACTIVITY_RESUMED -> {
                         if (firstUsageAt == null) firstUsageAt = event.timeStamp
                         val pkg = event.packageName
-                        if (pkg != context.packageName) {
+                        if (shouldCountPackage(context, pkg)) {
                             appOpenCountMap[pkg] = (appOpenCountMap[pkg] ?: 0) + 1
                         }
                     }
