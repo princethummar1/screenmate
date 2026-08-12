@@ -63,16 +63,25 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
   const clientLogicalToday = getLogicalDateStr();
   const clientTodayLog = historyLogs?.find(l => l.log_date === clientLogicalToday);
 
-  // Compute members with dynamic todayStatus and total wasted time (only from room start date)
+  // Compute members with dynamic todayStatus, dynamic points, and total wasted time (only from room start date)
   const dynamicMembers = members.map(m => {
     const userLogs = allRoomLogs?.filter(l => l.user_id === m.user_id) || [];
     const logToday = userLogs.find(l => l.log_date === clientLogicalToday);
-    const totalWastedMinutes = userLogs
-      .filter(l => l.log_date >= room.start_date)
-      .reduce((sum, l) => sum + (l.screen_time_minutes || 0), 0);
+    
+    const validLogs = userLogs.filter(l => l.log_date >= room.start_date);
+    
+    const totalWastedMinutes = validLogs.reduce((sum, l) => sum + (l.screen_time_minutes || 0), 0);
+    
+    const dynamicPoints = validLogs.reduce((sum, l) => {
+      if (l.screen_time_minutes <= room.goal_minutes) {
+        return sum + 100 + (room.goal_minutes - l.screen_time_minutes);
+      }
+      return sum + 20; // 20 points for trying
+    }, 0);
     
     return {
       ...m,
+      total_points: dynamicPoints,
       todayStatus: logToday?.status as any || 'pending',
       uploadTime: logToday?.created_at,
       totalWastedMinutes
