@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { UploadCloud, CheckCircle, Flame, Trophy, Loader2, Users, Clock, Bell, ArrowLeft, Activity, Info } from 'lucide-react';
+import { UploadCloud, CheckCircle, Flame, Trophy, Loader2, Users, Clock, Bell, ArrowLeft, Activity, Info, RefreshCw } from 'lucide-react';
 import ShareModal from './ShareModal';
 import Link from 'next/link';
 import HistoryChart from './HistoryChart';
@@ -251,16 +251,26 @@ export default function ActiveRoom({ room, members, currentUserId, historyLogs =
           </div>
         </div>
         
-        <button 
-          onClick={() => setShowShareModal(true)}
-          className="w-full md:w-auto relative group overflow-hidden rounded-2xl bg-white/10 hover:bg-white/20 transition-all border border-white/10 px-6 py-3"
-        >
-          <div className="flex items-center justify-center gap-3 relative z-10">
-            <span className="text-white font-bold">Invite:</span>
-            <span className="px-3 py-1 bg-black/50 rounded-lg text-purple-300 font-mono tracking-widest">{room.invite_code}</span>
-            <Users className="w-4 h-4 text-white/50 group-hover:text-white transition-colors" />
-          </div>
-        </button>
+        <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full md:w-auto relative group overflow-hidden rounded-2xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-all border border-purple-500/20 px-6 py-3 font-bold flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh Data
+          </button>
+          
+          <button 
+            onClick={() => setShowShareModal(true)}
+            className="w-full md:w-auto relative group overflow-hidden rounded-2xl bg-white/10 hover:bg-white/20 transition-all border border-white/10 px-6 py-3"
+          >
+            <div className="flex items-center justify-center gap-3 relative z-10">
+              <span className="text-white font-bold">Invite:</span>
+              <span className="px-3 py-1 bg-black/50 rounded-lg text-purple-300 font-mono tracking-widest">{room.invite_code}</span>
+              <Users className="w-4 h-4 text-white/50 group-hover:text-white transition-colors" />
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* Challenge Countdown Header */}

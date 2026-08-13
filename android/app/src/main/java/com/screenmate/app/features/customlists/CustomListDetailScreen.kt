@@ -17,7 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -25,6 +27,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.screenmate.app.ScreenMateApplication
+import com.screenmate.app.core.database.entity.CustomListEntity
 import com.screenmate.app.core.database.entity.CustomListItemEntity
 import com.screenmate.app.core.ui.theme.*
 import kotlinx.coroutines.flow.*
@@ -36,14 +39,14 @@ class CustomListDetailViewModel(application: Application, private val listId: St
     private val customListDao = db.customListDao()
     private val customListItemDao = db.customListItemDao()
 
-    val list = customListDao.getById(listId)
+    val list: StateFlow<CustomListEntity?> = customListDao.getById(listId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val items = _searchQuery.flatMapLatest { query ->
+    val items: StateFlow<List<CustomListItemEntity>> = _searchQuery.flatMapLatest { query ->
         if (query.isBlank()) {
             customListItemDao.getByListId(listId)
         } else {
@@ -61,9 +64,9 @@ class CustomListDetailViewModel(application: Application, private val listId: St
                 id = UUID.randomUUID().toString(),
                 listId = listId,
                 title = title,
-                subtitle = subtitle,
-                url = url,
-                notes = notes,
+                subtitle = subtitle?.takeIf { it.isNotBlank() },
+                url = url?.takeIf { it.isNotBlank() },
+                notes = notes?.takeIf { it.isNotBlank() },
                 createdAt = System.currentTimeMillis(),
                 updatedAt = System.currentTimeMillis()
             )
@@ -71,21 +74,17 @@ class CustomListDetailViewModel(application: Application, private val listId: St
         }
     }
 
-    fun updateItem(id: String, title: String, subtitle: String?, url: String?, notes: String?) {
+    fun updateItem(entity: CustomListItemEntity, title: String, subtitle: String?, url: String?, notes: String?) {
         viewModelScope.launch {
-            val currentItems = items.value
-            val item = currentItems.find { it.id == id }
-            if (item != null) {
-                customListItemDao.update(
-                    item.copy(
-                        title = title,
-                        subtitle = subtitle,
-                        url = url,
-                        notes = notes,
-                        updatedAt = System.currentTimeMillis()
-                    )
+            customListItemDao.update(
+                entity.copy(
+                    title = title,
+                    subtitle = subtitle?.takeIf { it.isNotBlank() },
+                    url = url?.takeIf { it.isNotBlank() },
+                    notes = notes?.takeIf { it.isNotBlank() },
+                    updatedAt = System.currentTimeMillis()
                 )
-            }
+            )
         }
     }
 
@@ -106,12 +105,9 @@ class CustomListDetailViewModelFactory(
     private val application: Application,
     private val listId: String
 ) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(CustomListDetailViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return CustomListDetailViewModel(application, listId) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
+        return CustomListDetailViewModel(application, listId) as T
     }
 }
 
@@ -121,7 +117,7 @@ fun CustomListDetailScreen(
     listId: String,
     onNavigateBack: () -> Unit,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val application = context.applicationContext as Application
     val viewModel: CustomListDetailViewModel = viewModel(
         factory = CustomListDetailViewModelFactory(application, listId)
@@ -133,7 +129,7 @@ fun CustomListDetailScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editItem by remember { mutableStateOf<CustomListItemEntity?>(null) }
-    var deleteItem by remember { mutableStateOf<CustomListItemEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<CustomListItemEntity?>(null) }
 
     Scaffold(
         topBar = {
@@ -187,7 +183,7 @@ fun CustomListDetailScreen(
                 Text(
                     if (searchQuery.isNotBlank()) "No items match your search." else "No items yet.\nTap + to add one.",
                     color = TextSecondary,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = TextAlign.Center
                 )
             }
         } else {
@@ -204,7 +200,7 @@ fun CustomListDetailScreen(
                             .fillMaxWidth()
                             .combinedClickable(
                                 onClick = { editItem = item },
-                                onLongClick = { deleteItem = item }
+                                onLongClick = { deleteTarget = item }
                             ),
                         colors = CardDefaults.cardColors(containerColor = DarkSurface)
                     ) {
@@ -225,7 +221,7 @@ fun CustomListDetailScreen(
                                 if (!item.subtitle.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = item.subtitle,
+                                        text = item.subtitle!!,
                                         color = TextSecondary,
                                         style = MaterialTheme.typography.bodyMedium
                                     )
@@ -234,7 +230,7 @@ fun CustomListDetailScreen(
                                     Spacer(modifier = Modifier.height(8.dp))
                                     SuggestionChip(
                                         onClick = { },
-                                        label = { Text(item.status, color = TextPrimary) },
+                                        label = { Text(item.status!!, color = TextPrimary) },
                                         colors = SuggestionChipDefaults.suggestionChipColors(containerColor = DarkSurfaceVariant)
                                     )
                                 }
@@ -254,10 +250,10 @@ fun CustomListDetailScreen(
     }
 
     if (showAddDialog || editItem != null) {
-        var title by remember { mutableStateOf(editItem?.title ?: "") }
-        var subtitle by remember { mutableStateOf(editItem?.subtitle ?: "") }
-        var url by remember { mutableStateOf(editItem?.url ?: "") }
-        var notes by remember { mutableStateOf(editItem?.notes ?: "") }
+        var title by remember(editItem) { mutableStateOf(editItem?.title ?: "") }
+        var subtitle by remember(editItem) { mutableStateOf(editItem?.subtitle ?: "") }
+        var url by remember(editItem) { mutableStateOf(editItem?.url ?: "") }
+        var notes by remember(editItem) { mutableStateOf(editItem?.notes ?: "") }
 
         AlertDialog(
             onDismissRequest = { 
@@ -268,47 +264,15 @@ fun CustomListDetailScreen(
             text = {
                 Column {
                     OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = { Text("Title") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
+                        value = title, onValueChange = { title = it },
+                        label = { Text("Title") }, modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = subtitle,
-                        onValueChange = { subtitle = it },
-                        label = { Text("Subtitle (Optional)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        label = { Text("URL (Optional)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it },
-                        label = { Text("Notes (Optional)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
+                        value = subtitle, onValueChange = { subtitle = it },
+                        label = { Text("Subtitle (Optional)") }, modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
                     )
                 }
             },
@@ -317,9 +281,9 @@ fun CustomListDetailScreen(
                     onClick = {
                         if (title.isNotBlank()) {
                             if (editItem != null) {
-                                viewModel.updateItem(editItem!!.id, title, subtitle.takeIf { it.isNotBlank() }, url.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() })
+                                viewModel.updateItem(editItem!!, title, subtitle, url, notes)
                             } else {
-                                viewModel.addItem(title, subtitle.takeIf { it.isNotBlank() }, url.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() })
+                                viewModel.addItem(title, subtitle, url, notes)
                             }
                             showAddDialog = false
                             editItem = null
@@ -341,23 +305,23 @@ fun CustomListDetailScreen(
         )
     }
 
-    if (deleteItem != null) {
+    if (deleteTarget != null) {
         AlertDialog(
-            onDismissRequest = { deleteItem = null },
+            onDismissRequest = { deleteTarget = null },
             title = { Text("Delete Item?", color = TextPrimary) },
-            text = { Text("Are you sure you want to delete '${deleteItem!!.title}'?", color = TextSecondary) },
+            text = { Text("Are you sure you want to delete '${deleteTarget!!.title}'?", color = TextSecondary) },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteItem(deleteItem!!)
-                        deleteItem = null
+                        viewModel.deleteItem(deleteTarget!!)
+                        deleteTarget = null
                     }
                 ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteItem = null }) {
+                TextButton(onClick = { deleteTarget = null }) {
                     Text("Cancel", color = TextSecondary)
                 }
             },

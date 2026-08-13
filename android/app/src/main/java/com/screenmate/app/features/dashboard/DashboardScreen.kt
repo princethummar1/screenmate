@@ -158,8 +158,9 @@ class DashboardViewModel : ViewModel() {
                 com.screenmate.app.usage.SyncScheduler.scheduleImmediateSync(context)
 
                 _syncStatus.value = "Done! $updatedCount day(s) updated. Points will refresh."
-                _todayTime.value = db.dailyUsageDao().getByDateDirect(DateUtils.todayDate())?.totalScreenTimeSeconds ?: _todayTime.value
-                _unlocks.value = db.dailyUsageDao().getByDateDirect(DateUtils.todayDate())?.unlockCount ?: _unlocks.value
+                
+                // Fully reload all data so the dashboard reflects the new local DB state
+                loadData(context)
             } catch (e: Exception) {
                 _syncStatus.value = "Sync failed: ${e.message}"
             } finally {
